@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="theme-color" content="#0a0a0f" />
+  <title>Gestura – Live Classroom</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+    <video id="video" playsinline autoplay muted></video>
+    <canvas id="canvas"></canvas>
+
+    <!-- Top Status Bar -->
+    <header id="topbar">
+      <div class="brand">GESTURA</div>
+      <div class="status-pills">
+        <span id="mode-pill">Ready</span>
+        <span id="gesture-pill">—</span>
+      </div>
+      <button id="menu-btn" class="icon-btn" title="Menu">☰</button>
+    </header>
+
+    <!-- Right Side Menu (iOS style) -->
+    <aside id="side-menu" class="glass-panel hidden">
+      <div class="panel-head">
+        <h3>Tools</h3>
+        <button class="close-btn" data-close="side-menu">✕</button>
+      </div>
+      <div class="menu-grid">
+        <button class="menu-item" data-action="whiteboard"><span>Whiteboard</span></button>
+        <button class="menu-item" data-action="blackboard"><span>Blackboard</span></button>
+        <button class="menu-item" data-action="draw"><span>Draw</span></button>
+        <button class="menu-item" data-action="highlight"><span>Highlight</span></button>
+        <button class="menu-item" data-action="laser"><span>Laser</span></button>
+        <button class="menu-item" data-action="pdf"><span>PDF Board</span></button>
+        <button class="menu-item" data-action="notes"><span>Notes</span></button>
+        <button class="menu-item" data-action="timer"><span>Timer</span></button>
+        <button class="menu-item" data-action="shapes"><span>Shapes</span></button>
+        <button class="menu-item" data-action="clear"><span>Clear</span></button>
+        <button class="menu-item" data-action="settings"><span>Spotlight</span></button>
+      </div>
+    </aside>
+
+    <!-- Left Board Panel (slides in) -->
+    <section id="board-panel" class="glass-panel board-panel hidden">
+      <div class="panel-head">
+        <h3 id="board-title">Whiteboard</h3>
+        <button class="close-btn" data-close="board-panel">✕</button>
+      </div>
+      <div id="board-canvas-wrap">
+        <canvas id="board-canvas"></canvas>
+      </div>
+      <div class="board-toolbar">
+        <button data-board-tool="pen" class="active">Pen</button>
+        <button data-board-tool="marker">Marker</button>
+        <button data-board-tool="highlighter">Highlight</button>
+        <button data-board-tool="pin">Pin</button>
+        <button data-board-tool="eraser">Eraser</button>
+        <button data-board-action="undo">Undo</button>
+        <button data-board-action="clear">Clear</button>
+      </div>
+    </section>
+
+    <!-- Floating PDF Panel -->
+    <section id="pdf-panel" class="glass-panel pdf-panel hidden">
+      <div class="panel-head">
+        <h3>PDF</h3>
+        <button class="close-btn" data-close="pdf-panel">✕</button>
+      </div>
+      <div class="pdf-drop" id="pdf-drop">
+        <p>Drop PDF here or</p>
+        <label class="file-btn">
+          Choose File
+          <input type="file" id="pdf-input" accept="application/pdf" hidden />
+        </label>
+      </div>
+      <iframe id="pdf-frame" class="hidden"></iframe>
+      <div class="pdf-tools">
+        <button data-pdf="highlight">Highlight</button>
+        <button data-pdf="pen">Pen</button>
+        <button data-pdf="clear">Clear Marks</button>
+      </div>
+    </section>
+
+    <!-- Notes Panel (slides up) -->
+    <section id="notes-panel" class="glass-panel bottom-sheet hidden">
+      <div class="sheet-handle"></div>
+      <div class="panel-head">
+        <h3>Notes</h3>
+        <button class="close-btn" data-close="notes-panel">✕</button>
+      </div>
+      <textarea id="notes-area" placeholder="Teacher notes (private)..."></textarea>
+    </section>
+
+    <!-- Timer Panel -->
+    <section id="timer-panel" class="glass-panel timer-panel hidden">
+      <div class="panel-head">
+        <h3>Timer</h3>
+        <button class="close-btn" data-close="timer-panel">✕</button>
+      </div>
+      <div id="timer-display">05:00</div>
+      <div class="timer-controls">
+        <button data-timer="5">5m</button>
+        <button data-timer="10">10m</button>
+        <button data-timer="15">15m</button>
+        <button data-timer="start">Start</button>
+        <button data-timer="reset">Reset</button>
+      </div>
+    </section>
+
+    <!-- Draw Toolbar (bottom) -->
+    <div id="draw-bar" class="glass-bar hidden">
+      <div class="swatch active" data-color="#00d4ff"></div>
+      <div class="swatch" data-color="#ff4d6d"></div>
+      <div class="swatch" data-color="#ffd60a"></div>
+      <div class="swatch" data-color="#70e000"></div>
+      <div class="swatch" data-color="#ffffff"></div>
+      <select id="brush-select" class="brush-select">
+        <option value="pen">Pen</option>
+        <option value="marker">Marker</option>
+        <option value="highlighter">Highlighter</option>
+        <option value="calligraphy">Calligraphy</option>
+        <option value="dotted">Dotted</option>
+        <option value="soft">Soft Brush</option>
+      </select>
+      <button id="btn-pin">Pin</button>
+      <button id="btn-eraser">Eraser</button>
+      <button id="btn-undo">Undo</button>
+      <button id="btn-exit-draw">Done</button>
+    </div>
+
+    <!-- Start Screen -->
+    <div id="start-screen">
+      <div class="start-card glass-panel">
+        <h1>GESTURA</h1>
+        <p class="tagline">Live Classroom · Gesture Teaching</p>
+        <button id="start-btn">Start Session</button>
+        <p class="hint">Allow camera access when prompted</p>
+        <div class="gesture-guide">
+          <div><b>Slide hand down</b> Open menu</div>
+          <div><b>Slide hand up</b> Close everything</div>
+          <div><b>Pinch</b> Draw / select</div>
+          <div><b>Swipe R→L</b> Open Whiteboard</div>
+          <div><b>Point hold</b> Laser</div>
+          <div><b>Victory</b> Highlighter</div>
+          <div><b>Double pinch</b> Undo</div>
+          <div><b>Thumbs up/down</b> Reactions</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+  <script src="app.js"></script>
+</body>
+</html>
