@@ -2,151 +2,169 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="theme-color" content="#0a0a0f" />
-  <title>Gestura – Live Classroom</title>
+  <title>Gestura | One-Finger Whiteboard & PDF Presentation Tools</title>
+  <meta name="description" content="Present PDFs, draw with one pointing finger, and organize teaching tools in Gestura." />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <div id="app">
     <video id="video" playsinline autoplay muted></video>
-    <canvas id="canvas"></canvas>
+    <canvas id="canvas" style="touch-action: none;"></canvas>
 
-    <!-- Top Status Bar -->
     <header id="topbar">
       <div class="brand">GESTURA</div>
       <div class="status-pills">
         <span id="mode-pill">Ready</span>
         <span id="gesture-pill">—</span>
       </div>
-      <button id="menu-btn" class="icon-btn" title="Menu">☰</button>
+      <button id="menu-btn" class="icon-btn" title="Open tools" aria-label="Open tools" aria-controls="side-menu" aria-expanded="false">☰ <span>Tools</span></button>
     </header>
 
-    <!-- Right Side Menu (iOS style) -->
     <aside id="side-menu" class="glass-panel hidden">
       <div class="panel-head">
         <h3>Tools</h3>
-        <button class="close-btn" data-close="side-menu">✕</button>
+        <button class="close-btn" data-close="side-menu" aria-label="Close tools">✕</button>
       </div>
+      <p class="menu-hint">Point and hold to select. Open several tools together.</p>
       <div class="menu-grid">
-        <button class="menu-item" data-action="whiteboard"><span>Whiteboard</span></button>
-        <button class="menu-item" data-action="blackboard"><span>Blackboard</span></button>
+        <button class="menu-item" data-action="whiteboard" aria-pressed="false"><span>Whiteboard</span></button>
+        <button class="menu-item" data-action="blackboard" aria-pressed="false"><span>Blackboard</span></button>
         <button class="menu-item" data-action="draw"><span>Draw</span></button>
         <button class="menu-item" data-action="highlight"><span>Highlight</span></button>
         <button class="menu-item" data-action="laser"><span>Laser</span></button>
-        <button class="menu-item" data-action="pdf"><span>PDF Board</span></button>
-        <button class="menu-item" data-action="notes"><span>Notes</span></button>
-        <button class="menu-item" data-action="timer"><span>Timer</span></button>
-        <button class="menu-item" data-action="shapes"><span>Shapes</span></button>
+        <button class="menu-item" data-action="pdf" aria-pressed="false"><span>PDF Board</span></button>
+        <button class="menu-item" data-action="notes" aria-pressed="false"><span>Notes</span></button>
+        <button class="menu-item" data-action="timer" aria-pressed="false"><span>Timer</span></button>
         <button class="menu-item" data-action="clear"><span>Clear</span></button>
         <button class="menu-item" data-action="settings"><span>Spotlight</span></button>
       </div>
     </aside>
 
-    <!-- Left Board Panel (slides in) -->
-    <section id="board-panel" class="glass-panel board-panel hidden">
-      <div class="panel-head">
-        <h3 id="board-title">Whiteboard</h3>
-        <button class="close-btn" data-close="board-panel">✕</button>
-      </div>
-      <div id="board-canvas-wrap">
-        <canvas id="board-canvas"></canvas>
-      </div>
-      <div class="board-toolbar">
-        <button data-board-tool="pen" class="active">Pen</button>
-        <button data-board-tool="highlighter">Highlight</button>
-        <button data-board-tool="eraser">Eraser</button>
-        <button data-board-action="undo">Undo</button>
-        <button data-board-action="clear">Clear</button>
-      </div>
-    </section>
+    <main id="workspace" aria-label="Open tool windows" data-count="0">
+      <section id="board-panel" class="glass-panel board-panel hidden">
+        <div class="panel-head">
+          <h3 id="board-title">Whiteboard</h3>
+          <button class="close-btn" data-close="board-panel" aria-label="Close board">✕</button>
+        </div>
+        <div id="board-canvas-wrap">
+          <canvas id="board-canvas" aria-label="Drawing board"></canvas>
+        </div>
+        <div class="brush-size" role="group" aria-label="Brush size">
+          <button data-brush-step="-1" aria-label="Decrease brush size">−</button>
+          <output class="brush-value" aria-live="polite">3 px</output>
+          <button data-brush-step="1" aria-label="Increase brush size">+</button>
+        </div>
+        <div class="board-toolbar">
+          <button data-board-tool="pen" class="active" aria-pressed="true">Pen</button>
+          <button data-board-tool="highlighter" aria-pressed="false">Highlight</button>
+          <button data-board-tool="eraser" aria-pressed="false">Eraser</button>
+          <button data-board-action="undo">Undo</button>
+          <button data-board-action="clear">Clear</button>
+        </div>
+      </section>
 
-    <!-- Floating PDF Panel -->
-    <section id="pdf-panel" class="glass-panel pdf-panel hidden">
-      <div class="panel-head">
-        <h3>PDF</h3>
-        <button class="close-btn" data-close="pdf-panel">✕</button>
-      </div>
-      <div class="pdf-drop" id="pdf-drop">
-        <p>Drop PDF here or</p>
-        <label class="file-btn">
-          Choose File
-          <input type="file" id="pdf-input" accept="application/pdf" hidden />
-        </label>
-      </div>
-      <iframe id="pdf-frame" class="hidden"></iframe>
-      <div class="pdf-tools">
-        <button data-pdf="highlight">Highlight</button>
-        <button data-pdf="pen">Pen</button>
-        <button data-pdf="clear">Clear Marks</button>
-      </div>
-    </section>
+      <section id="pdf-panel" class="glass-panel pdf-panel hidden">
+        <div class="panel-head">
+          <h3>PDF</h3>
+          <button class="close-btn" data-close="pdf-panel" aria-label="Close pdf">✕</button>
+        </div>
+        <div class="pdf-drop" id="pdf-drop">
+          <p>Drop PDF here or</p>
+          <label class="file-btn">
+            Choose PDF
+            <input type="file" id="pdf-input" accept="application/pdf" hidden />
+          </label>
+        </div>
+        <div id="pdf-reader" class="hidden">
+          <div id="pdf-pages" tabindex="0" aria-label="PDF document, scroll to read"></div>
+          <div id="pdf-scroll" role="slider" tabindex="0" aria-label="PDF scroll position" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span></span></div>
+        </div>
+        <p id="pdf-status" role="status" aria-live="polite">Choose a PDF to begin. Files stay in your browser.</p>
+        <div class="pdf-tools">
+          <button id="pdf-prev" disabled>Previous</button>
+          <button id="pdf-next" disabled>Next</button>
+          <button id="pdf-expand" aria-pressed="false">Expand</button>
+          <button id="pdf-change">Choose PDF</button>
+        </div>
+      </section>
 
-    <!-- Notes Panel (slides up) -->
-    <section id="notes-panel" class="glass-panel bottom-sheet hidden">
-      <div class="sheet-handle"></div>
-      <div class="panel-head">
-        <h3>Notes</h3>
-        <button class="close-btn" data-close="notes-panel">✕</button>
-      </div>
-      <textarea id="notes-area" placeholder="Teacher notes (private)..."></textarea>
-    </section>
+      <section id="notes-panel" class="glass-panel bottom-sheet hidden">
+        <div class="sheet-handle"></div>
+        <div class="panel-head">
+          <h3>Notes</h3>
+          <button class="close-btn" data-close="notes-panel" aria-label="Close notes">✕</button>
+        </div>
+        <textarea id="notes-area" aria-label="Session notes" placeholder="Session notes (cleared when you leave)..."></textarea>
+      </section>
 
-    <!-- Timer Panel -->
-    <section id="timer-panel" class="glass-panel timer-panel hidden">
-      <div class="panel-head">
-        <h3>Timer</h3>
-        <button class="close-btn" data-close="timer-panel">✕</button>
-      </div>
-      <div id="timer-display">05:00</div>
-      <div class="timer-controls">
-        <button data-timer="5">5m</button>
-        <button data-timer="10">10m</button>
-        <button data-timer="15">15m</button>
-        <button data-timer="start">Start</button>
-        <button data-timer="reset">Reset</button>
-      </div>
-    </section>
+      <section id="timer-panel" class="glass-panel timer-panel hidden">
+        <div class="panel-head">
+          <h3>Timer</h3>
+          <button class="close-btn" data-close="timer-panel" aria-label="Close timer">✕</button>
+        </div>
+        <div id="timer-display">05:00</div>
+        <div class="timer-controls">
+          <button data-timer="5">5m</button>
+          <button data-timer="10">10m</button>
+          <button data-timer="15">15m</button>
+          <button data-timer="start">Start</button>
+          <button data-timer="reset">Reset</button>
+        </div>
+      </section>
+    </main>
 
-    <!-- Draw Toolbar (bottom) -->
+    <p id="workspace-hint" role="status">Point at Tools and hold to open. Point at × to close. Windows arrange automatically. Point to draw; fold your index finger to lift.</p>
+
     <div id="draw-bar" class="glass-bar hidden">
-      <div class="swatch active" data-color="#00d4ff"></div>
-      <div class="swatch" data-color="#ff4d6d"></div>
-      <div class="swatch" data-color="#ffd60a"></div>
-      <div class="swatch" data-color="#70e000"></div>
-      <div class="swatch" data-color="#ffffff"></div>
-      <button id="btn-highlighter">Highlight</button>
-      <button id="btn-eraser">Eraser</button>
+      <div class="brush-size" role="group" aria-label="Brush size">
+        <button data-brush-step="-1" aria-label="Decrease brush size">−</button>
+        <output class="brush-value" aria-live="polite">3 px</output>
+        <button data-brush-step="1" aria-label="Increase brush size">+</button>
+      </div>
+      <button class="swatch active" data-color="#00d4ff" aria-label="Cyan ink" aria-pressed="true"></button>
+      <button class="swatch" data-color="#ff4d6d" aria-label="Pink ink" aria-pressed="false"></button>
+      <button class="swatch" data-color="#ffd60a" aria-label="Yellow ink" aria-pressed="false"></button>
+      <button class="swatch" data-color="#70e000" aria-label="Green ink" aria-pressed="false"></button>
+      <button class="swatch" data-color="#ffffff" aria-label="White ink" aria-pressed="false"></button>
+      <button id="btn-highlighter" aria-pressed="false">Highlight</button>
+      <button id="btn-eraser" aria-pressed="false">Eraser</button>
       <button id="btn-undo">Undo</button>
-      <button id="btn-exit-draw">Done</button>
+      <button id="btn-exit-draw" aria-label="Close drawing tools">✕</button>
     </div>
 
-    <!-- Start Screen -->
     <div id="start-screen">
       <div class="start-card glass-panel">
-        <h1>GESTURA</h1>
-        <p class="tagline">Live Classroom · Gesture Teaching</p>
+        <p class="start-brand">GESTURA / PRESENTER WORKSPACE</p>
+        <h1>Make your teaching <em>visible.</em></h1>
+        <p class="tagline">A gesture-controlled workspace for remote classes, meetings, and events. Present PDFs, explain ideas on a whiteboard, and select controls with one pointing finger.</p>
         <button id="start-btn">Start Session</button>
-        <p class="hint">Allow camera access when prompted</p>
+        <p class="hint">Camera required for gestures. Mouse, touch, and keyboard controls are available too.</p>
+        <p id="start-status" role="status" aria-live="polite"></p>
+        <button id="manual-btn" class="secondary-btn">Open without camera</button>
         <div class="gesture-guide">
-          <div><b>Slide hand down</b> Open menu</div>
-          <div><b>Slide hand up</b> Close everything</div>
-          <div><b>Pinch</b> Draw / select</div>
-          <div><b>Swipe R→L</b> Open Whiteboard</div>
-          <div><b>Point hold</b> Laser</div>
-          <div><b>Victory</b> Highlighter</div>
-          <div><b>Double pinch</b> Undo</div>
-          <div><b>Thumbs up/down</b> Reactions</div>
+          <div><b>Point and hold</b> Select any button</div>
+          <div><b>Tools menu</b> Open more windows</div>
+          <div><b>Point at ×</b> Close that window</div>
+          <div><b>Automatic layout</b> Windows fit together</div>
+          <div><b>Point to draw</b> Fold index finger to lift</div>
+          <div><b>PDF right rail</b> Point to scroll</div>
         </div>
+        <details class="about-workspace">
+          <summary>How does Gestura work with remote classes?</summary>
+          <p>Open your teaching workspace, allow camera access for hand gestures, and use the Tools menu to choose a whiteboard or PDF. Share this browser tab or window through your existing meeting app. Gestura does not host participant calls, record sessions, or save notes after closing the page.</p>
+        </details>
+        <details class="about-workspace">
+          <summary>How do I draw and control tools with one finger?</summary>
+          <p>Extend only your index finger and fold your other fingers. Hold over a button until the ring completes to select it. Move over a board to draw, then fold your index finger to lift the brush. Use the brush size buttons for finer lines or wider marks.</p>
+        </details>
       </div>
     </div>
+    <div id="gesture-cursor" aria-hidden="true" hidden></div>
   </div>
-
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
   <script src="app.js"></script>
 </body>
 </html>

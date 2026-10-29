@@ -23,6 +23,7 @@ const timerDisplay = document.getElementById("timer-display");
 
 const state = {
   mode: "idle",
+  brushSize: 3,
   drawColor: "#00d4ff",
   highlighter: false,
   eraser: false,
@@ -35,124 +36,39 @@ const state = {
   trail: [],
   laser: false,
   spotlight: false,
-  raiseHand: false,
-  reaction: null, // "up" | "down" | null
-  reactionUntil: 0,
   timerSeconds: 300,
   timerRunning: false,
   timerInterval: null,
 
-  // gesture engine
-  raw: "NONE",
-  stable: "NONE",
-  stableCount: 0,
-  lastActionAt: 0,
-  cooldown: 700,
 
-  // motion tracking
-  tipHistory: [],
-  palmHistory: [],
-  pinchHistory: [],
-  lastPinchAt: 0,
-  pointHoldFrames: 0,
-  zoomBox: null,
 };
 
 let hands = null;
-let camera = null;
 
 function now() { return performance.now(); }
 function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
-function canAct() { return now() - state.lastActionAt > state.cooldown; }
-function markAct() { state.lastActionAt = now(); }
+function markAct() {}
 
-// ---------- Finger helpers ----------
-function fingerExtended(lm, tip, pip, mcp) {
-  // for non-thumb: tip further up than pip
-  return lm[tip].y < lm[pip].y - 0.015;
-}
-function thumbExtended(lm) {
-  return Math.abs(lm[4].x - lm[2].x) > 0.045;
-}
-function countExtended(lm) {
-  let n = 0;
-  if (thumbExtended(lm)) n++;
-  if (fingerExtended(lm, 8, 6, 5)) n++;
-  if (fingerExtended(lm, 12, 10, 9)) n++;
-  if (fingerExtended(lm, 16, 14, 13)) n++;
-  if (fingerExtended(lm, 20, 18, 17)) n++;
-  return n;
-}
-
-function isPinch(lm) {
-  return lm && lm.length > 8 && dist(lm[4], lm[8]) < 0.048;
-}
-function isOpenPalm(lm) {
-  return countExtended(lm) >= 4 && !isPinch(lm);
-}
-function isFist(lm) {
-  return countExtended(lm) <= 1 && !isPinch(lm);
-}
-function isVictory(lm) {
-  // index + middle up, ring+pinky down
-  const i = fingerExtended(lm, 8, 6, 5);
-  const m = fingerExtended(lm, 12, 10, 9);
-  const r = fingerExtended(lm, 16, 14, 13);
-  const p = fingerExtended(lm, 20, 18, 17);
-  return i && m && !r && !p;
-}
-function isThumbsUp(lm) {
-  const thumbUp = lm[4].y < lm[3].y && lm[3].y < lm[2].y;
-  const othersDown =
-    !fingerExtended(lm, 8, 6, 5) &&
-    !fingerExtended(lm, 12, 10, 9) &&
-    !fingerExtended(lm, 16, 14, 13) &&
-    !fingerExtended(lm, 20, 18, 17);
-  return thumbUp && othersDown;
-}
-function isThumbsDown(lm) {
-  const thumbDown = lm[4].y > lm[3].y && lm[3].y > lm[2].y;
-  const othersDown =
-    !fingerExtended(lm, 8, 6, 5) &&
-    !fingerExtended(lm, 12, 10, 9) &&
-    !fingerExtended(lm, 16, 14, 13) &&
-    !fingerExtended(lm, 20, 18, 17);
-  return thumbDown && othersDown;
-}
+// Only an extended index finger controls the workspace. Fold it to lift ink.
 function isPoint(lm) {
-  // only index extended
-  return (
-    fingerExtended(lm, 8, 6, 5) &&
-    !fingerExtended(lm, 12, 10, 9) &&
-    !fingerExtended(lm, 16, 14, 13) &&
-    !fingerExtended(lm, 20, 18, 17) &&
-    !isPinch(lm)
-  );
+  const extended = (tip, joint, base) => dist(lm[tip], lm[base]) > dist(lm[joint], lm[base]) * 1.45;
+  return extended(8, 6, 5) && !extended(12, 10, 9) &&
+    !extended(16, 14, 13) && !extended(20, 18, 17);
 }
-function isRaiseHand(lm) {
-  return isOpenPalm(lm) && lm[9].y < 0.32;
+let filteredTip = null;
+function smoothTip(tip) {
+  const t = now();
+  if (!filteredTip) filteredTip = {...tip, t};
+  const dt = Math.max(1, t - filteredTip.t);
+  const speed = dist(tip, filteredTip) / dt;
+  const alpha = 1 - Math.exp(-dt / (speed > .001 ? 18 : 65));
+  filteredTip = {x: filteredTip.x + alpha * (tip.x - filteredTip.x),
+    y: filteredTip.y + alpha * (tip.y - filteredTip.y), t};
+  return filteredTip;
 }
-
-function detectRaw(lm) {
-  if (isPinch(lm)) return "PINCH";
-  if (isVictory(lm)) return "VICTORY";
-  if (isThumbsUp(lm)) return "THUMBS_UP";
-  if (isThumbsDown(lm)) return "THUMBS_DOWN";
-  if (isPoint(lm)) return "POINT";
-  if (isFist(lm)) return "FIST";
-  if (isOpenPalm(lm)) return "OPEN_PALM";
-  return "NONE";
-}
-
-function stabilize(raw) {
-  if (raw === state.raw) state.stableCount++;
-  else { state.raw = raw; state.stableCount = 1; }
-  if (state.stableCount >= 4) state.stable = state.raw;
-  return state.stable;
-}
-
 // ---------- UI helpers ----------
 function setMode(m) {
+  if (m !== "draw" && state.currentPath) { state.paths.push(state.currentPath); state.currentPath = null; }
   state.mode = m;
   modePill.textContent = m.charAt(0).toUpperCase() + m.slice(1);
   drawBar.classList.toggle("hidden", m !== "draw");
@@ -200,36 +116,44 @@ function drawTrail() {
   ctx.lineCap = "round";
   ctx.stroke();
 }
+const inkCache = document.createElement('canvas');
+const inkCtx = inkCache.getContext('2d');
+let cachedPaths = -1;
+function paintPath(context, path) {
+  if (!path?.points.length) return;
+  const points = path.points;
+  context.save();
+  context.strokeStyle = context.fillStyle = path.color;
+  context.lineWidth = path.width;
+  context.lineCap = context.lineJoin = 'round';
+  context.globalAlpha = path.alpha ?? 1;
+  context.globalCompositeOperation = path.eraser ? 'destination-out' : 'source-over';
+  context.beginPath();
+  context.moveTo(points[0].x, points[0].y);
+  if (points.length === 1) {
+    context.arc(points[0].x, points[0].y, path.width / 2, 0, Math.PI * 2);
+    context.fill();
+  } else {
+    for (let i = 1; i < points.length - 1; i++) {
+      context.quadraticCurveTo(points[i].x, points[i].y,
+        (points[i].x + points[i+1].x)/2, (points[i].y + points[i+1].y)/2);
+    }
+    context.lineTo(points.at(-1).x, points.at(-1).y);
+    context.stroke();
+  }
+  context.restore();
+}
 function drawPaths() {
-  for (const p of state.paths) {
-    if (p.points.length < 2) continue;
-    ctx.beginPath();
-    ctx.moveTo(p.points[0].x, p.points[0].y);
-    for (let i = 1; i < p.points.length; i++) ctx.lineTo(p.points[i].x, p.points[i].y);
-    ctx.strokeStyle = p.color;
-    ctx.lineWidth = p.width;
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    ctx.globalAlpha = p.alpha ?? 1;
-    if (p.eraser) ctx.globalCompositeOperation = "destination-out";
-    ctx.stroke();
-    ctx.globalCompositeOperation = "source-over";
-    ctx.globalAlpha = 1;
+  if (inkCache.width !== canvas.width || inkCache.height !== canvas.height) {
+    inkCache.width = canvas.width; inkCache.height = canvas.height; cachedPaths = -1;
   }
-  if (state.currentPath && state.currentPath.points.length > 1) {
-    const p = state.currentPath;
-    ctx.beginPath();
-    ctx.moveTo(p.points[0].x, p.points[0].y);
-    for (let i = 1; i < p.points.length; i++) ctx.lineTo(p.points[i].x, p.points[i].y);
-    ctx.strokeStyle = p.color;
-    ctx.lineWidth = p.width;
-    ctx.lineCap = "round";
-    ctx.globalAlpha = p.alpha ?? 1;
-    if (p.eraser) ctx.globalCompositeOperation = "destination-out";
-    ctx.stroke();
-    ctx.globalCompositeOperation = "source-over";
-    ctx.globalAlpha = 1;
+  if (cachedPaths !== state.paths.length) {
+    inkCtx.clearRect(0, 0, inkCache.width, inkCache.height);
+    state.paths.forEach(path => paintPath(inkCtx, path));
+    cachedPaths = state.paths.length;
   }
+  ctx.drawImage(inkCache, 0, 0);
+  paintPath(ctx, state.currentPath);
 }
 function drawLaser(x, y) {
   const g = ctx.createRadialGradient(x, y, 0, x, y, 30);
@@ -267,35 +191,45 @@ function drawBadge(text, y = 28) {
 }
 
 // ---------- Board ----------
+const boardCache = document.createElement('canvas');
+const boardCacheCtx = boardCache.getContext('2d');
+let boardDirty = true, boardFrame = null;
 function resizeBoard() {
   const rect = boardWrap.getBoundingClientRect();
-  boardCanvas.width = Math.max(1, rect.width * 2);
-  boardCanvas.height = Math.max(1, rect.height * 2);
-  boardCtx.setTransform(2, 0, 0, 2, 0, 0);
-  redrawBoard();
+  const ratio = Math.min(2, devicePixelRatio || 1);
+  const width = Math.max(1, Math.round(rect.width * ratio));
+  const height = Math.max(1, Math.round(rect.height * ratio));
+  if (boardCanvas.width === width && boardCanvas.height === height) return;
+  if (boardCanvas.width > 1 && boardCanvas.height > 1) {
+    const sx = width / boardCanvas.width, sy = height / boardCanvas.height;
+    for (const path of [...state.boardPaths, state.boardCurrent].filter(Boolean)) {
+      path.points.forEach(point => {point.x *= sx; point.y *= sy;});
+    }
+  }
+  boardCanvas.width = boardCache.width = width;
+  boardCanvas.height = boardCache.height = height;
+  boardCtx.setTransform(ratio, 0, 0, ratio, 0, 0);
+  boardCacheCtx.setTransform(ratio, 0, 0, ratio, 0, 0);
+  boardDirty = true; redrawBoard();
 }
 function redrawBoard() {
-  boardCtx.clearRect(0, 0, boardCanvas.width, boardCanvas.height);
-  boardCtx.fillStyle = state.boardMode === "black" ? "#111" : "#f8f9fc";
-  boardCtx.fillRect(0, 0, boardCanvas.width, boardCanvas.height);
-  for (const p of state.boardPaths) {
-    if (p.points.length < 2) continue;
-    boardCtx.beginPath();
-    boardCtx.moveTo(p.points[0].x, p.points[0].y);
-    for (let i = 1; i < p.points.length; i++) boardCtx.lineTo(p.points[i].x, p.points[i].y);
-    boardCtx.strokeStyle = p.color;
-    boardCtx.lineWidth = p.width;
-    boardCtx.lineCap = "round";
-    boardCtx.globalAlpha = p.alpha ?? 1;
-    boardCtx.stroke();
-    boardCtx.globalAlpha = 1;
+  if (boardDirty) {
+    boardCacheCtx.clearRect(0, 0, boardCache.width, boardCache.height);
+    state.boardPaths.forEach(path => paintPath(boardCacheCtx, path));
+    boardDirty = false;
   }
+  boardCtx.clearRect(0, 0, boardCanvas.width, boardCanvas.height);
+  boardCtx.drawImage(boardCache, 0, 0, boardWrap.clientWidth, boardWrap.clientHeight);
+  paintPath(boardCtx, state.boardCurrent);
+}
+function queueBoardDraw() {
+  if (boardFrame !== null) return;
+  boardFrame = requestAnimationFrame(() => {boardFrame = null; redrawBoard();});
 }
 function openBoard(mode) {
   state.boardMode = mode;
   boardTitle.textContent = mode === "black" ? "Blackboard" : "Whiteboard";
   boardWrap.classList.toggle("black", mode === "black");
-  closeAllPanels();
   boardPanel.classList.remove("hidden");
   setTimeout(resizeBoard, 40);
   setMode("board");
@@ -322,228 +256,109 @@ function startTimer() {
   }, 1000);
 }
 
-// ---------- Motion: vertical slide + horizontal swipe ----------
-function trackMotions(tip, palm, stable) {
-  const t = now();
-  state.tipHistory.push({ x: tip.x, y: tip.y, t });
-  state.tipHistory = state.tipHistory.filter(p => t - p.t < 320);
-
-  if (stable === "OPEN_PALM" || stable === "POINT") {
-    state.palmHistory.push({ x: palm.x, y: palm.y, t });
-    state.palmHistory = state.palmHistory.filter(p => t - p.t < 360);
-  } else {
-    state.palmHistory = [];
+// ---------- One-finger pointer ----------
+let gestureTarget = null, gestureBoardDrawing = false;
+let dwellStarted = 0, dwellActivated = false, dwellBlockedUntil = 0;
+const gestureCursor = document.getElementById('gesture-cursor');
+function resetGesturePointer() {
+  if (gestureBoardDrawing) endBoardDraw();
+  gestureBoardDrawing = false;
+  if (state.currentPath && !manualDrawing) {
+    state.paths.push(state.currentPath); state.currentPath = null;
   }
-
-  if (state.palmHistory.length >= 5 && canAct()) {
-    const first = state.palmHistory[0];
-    const last = state.palmHistory[state.palmHistory.length - 1];
-    const dy = last.y - first.y; // down positive
-    const dx = first.x - last.x; // right→left positive in many mirrored setups
-
-    // Slide hand down → open menu
-    if (dy > 0.14 && Math.abs(dx) < 0.12) {
-      openMenu();
-      state.palmHistory = [];
-      return;
-    }
-    // Slide hand up → close everything
-    if (dy < -0.14 && Math.abs(dx) < 0.12) {
-      closeMenuAndMore();
-      state.palmHistory = [];
-      return;
-    }
-    // Swipe right → left → whiteboard
-    if (dx > 0.16 && Math.abs(dy) < 0.12) {
-      openBoard("white");
-      state.palmHistory = [];
-      return;
-    }
-  }
+  dwellStarted = 0; dwellActivated = false; filteredTip = null;
+  gestureTarget?.classList.remove('gesture-target'); gestureTarget = null;
+  gestureCursor.hidden = true;
 }
+function trackGesturePointer(tip) {
+  // Clamp to viewport to avoid edge miss-hits
+  const x = Math.max(2, Math.min(innerWidth - 2, tip.x * innerWidth));
+  const y = Math.max(2, Math.min(innerHeight - 2, tip.y * innerHeight));
+  gestureCursor.hidden = false;
+  gestureCursor.style.left = `${x}px`;
+  gestureCursor.style.top = `${y}px`;
 
-function trackDoublePinch(stable) {
-  const t = now();
-  if (stable === "PINCH") {
-    if (t - state.lastPinchAt > 80) {
-      state.pinchHistory.push(t);
-      state.pinchHistory = state.pinchHistory.filter(x => t - x < 600);
-      state.lastPinchAt = t;
-    }
-    // double pinch pattern: two pinch bursts close together when not drawing heavily
-    if (state.pinchHistory.length >= 2 && canAct() && state.mode !== "draw") {
-      // undo
-      state.paths.pop();
-      state.pinchHistory = [];
-      markAct();
-      drawBadge("Undo", 60);
-    }
+  // Temporarily hide cursor so elementFromPoint hits real UI
+  const prevVis = gestureCursor.style.visibility;
+  gestureCursor.style.visibility = 'hidden';
+  const hit = document.elementFromPoint(x, y);
+  gestureCursor.style.visibility = prevVis || '';
+
+  const target = hit?.closest('button, .file-btn, summary, #pdf-scroll, label.file-btn, [data-action], [data-close], [data-board-tool], [data-board-action], [data-timer], [data-brush-step], .swatch');
+  if (target !== gestureTarget) {
+    gestureTarget?.classList.remove('gesture-target');
+    gestureTarget = target || null;
+    dwellStarted = 0;
+    dwellActivated = false;
+    target?.classList.add('gesture-target');
   }
-}
-
-// ---------- Two-hand zoom frame ----------
-function handleTwoHands(multi) {
-  if (!multi || multi.length < 2) {
-    state.zoomBox = null;
-    return;
-  }
-  const a = multi[0][8];
-  const b = multi[1][8];
-  const x1 = Math.min(a.x, b.x) * canvas.width;
-  const y1 = Math.min(a.y, b.y) * canvas.height;
-  const x2 = Math.max(a.x, b.x) * canvas.width;
-  const y2 = Math.max(a.y, b.y) * canvas.height;
-  state.zoomBox = { x1, y1, x2, y2 };
-
-  // draw frame
-  ctx.save();
-  ctx.strokeStyle = "rgba(0,212,255,0.85)";
-  ctx.lineWidth = 2;
-  ctx.setLineDash([8, 6]);
-  ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
-  ctx.setLineDash([]);
-  ctx.restore();
-}
-
-// ---------- Main loop ----------
-function onResults(results) {
-  canvas.width = video.videoWidth || window.innerWidth;
-  canvas.height = video.videoHeight || window.innerHeight;
-
-  ctx.save();
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
-  drawPaths();
-
-  let stable = "NONE";
-  let tipX = 0, tipY = 0;
-
-  if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-    const lm = results.multiHandLandmarks[0];
-    const raw = detectRaw(lm);
-    stable = stabilize(raw);
-
-    const tip = lm[8];
-    const palm = lm[9];
-    tipX = tip.x * canvas.width;
-    tipY = tip.y * canvas.height;
-
-    state.trail.push({ x: tipX, y: tipY });
-    if (state.trail.length > 16) state.trail.shift();
-    drawTrail();
-
-    // motions
-    trackMotions(tip, palm, stable);
-    trackDoublePinch(stable);
-
-    // raise hand
-    state.raiseHand = isRaiseHand(lm);
-
-    // reactions
-    if (stable === "THUMBS_UP" && state.stableCount > 6) {
-      state.reaction = "up";
-      state.reactionUntil = now() + 1200;
-    }
-    if (stable === "THUMBS_DOWN" && state.stableCount > 6) {
-      state.reaction = "down";
-      state.reactionUntil = now() + 1200;
-    }
-
-    // Victory → highlighter mode
-    if (stable === "VICTORY" && state.stableCount > 7 && canAct()) {
-      state.highlighter = true;
-      state.eraser = false;
-      setMode("draw");
-      markAct();
-    }
-
-    // Point hold → laser / spotlight toggle
-    if (stable === "POINT") {
-      state.pointHoldFrames++;
-      if (state.pointHoldFrames > 18 && canAct()) {
-        // long point toggles laser
-        state.laser = !state.laser;
-        state.spotlight = false;
-        setMode(state.laser ? "laser" : "idle");
-        markAct();
-        state.pointHoldFrames = 0;
-      }
-    } else {
-      state.pointHoldFrames = 0;
-    }
-
-    // Fist hold → cancel
-    if (stable === "FIST" && state.stableCount > 8 && canAct()) {
-      closeMenuAndMore();
-      state.stableCount = 0;
-    }
-
-    // Draw with pinch (touch-screen style)
-    if (state.mode === "draw") {
-      if (stable === "PINCH") {
-        if (!state.currentPath) {
-          state.currentPath = {
-            points: [{ x: tipX, y: tipY }],
-            color: state.eraser ? "#000" : state.drawColor,
-            width: state.eraser ? 26 : (state.highlighter ? 20 : 4),
-            alpha: state.highlighter ? 0.35 : 1,
-            eraser: state.eraser
-          };
-        } else {
-          const last = state.currentPath.points[state.currentPath.points.length - 1];
-          if (Math.hypot(tipX - last.x, tipY - last.y) > 2.2) {
-            state.currentPath.points.push({ x: tipX, y: tipY });
+  let progress = 0;
+  if (target && !target.disabled && now() >= dwellBlockedUntil) {
+    if (target.id === 'pdf-scroll') {
+      scrollPdfAt(y);
+    } else if (!dwellActivated) {
+      if (!dwellStarted) dwellStarted = now();
+      // Slightly faster, more reliable dwell for tool selection
+      progress = Math.min(1, (now() - dwellStarted) / 700);
+      if (progress >= 1) {
+        dwellActivated = true;
+        dwellBlockedUntil = now() + 650;
+        try {
+          if (target.matches('.file-btn, #pdf-change, label.file-btn')) {
+            pdfStatus.textContent = 'Opening file picker…';
+            (document.getElementById('pdf-input') || target).click();
+          } else {
+            target.click();
           }
+        } catch (err) {
+          console.warn('Gesture click failed', err);
         }
-      } else if (state.currentPath) {
-        state.paths.push(state.currentPath);
-        state.currentPath = null;
       }
     }
-
-    // two hands frame
-    handleTwoHands(results.multiHandLandmarks);
-
-    // overlays
-    if (state.spotlight) drawSpotlight(tipX, tipY);
-    if (state.laser) drawLaser(tipX, tipY);
-    else drawCursor(tipX, tipY, stable === "PINCH" || stable === "POINT");
-
-    if (state.raiseHand) drawBadge("Hand Raised", canvas.height - 24);
-    if (state.reaction && now() < state.reactionUntil) {
-      drawBadge(state.reaction === "up" ? "Thumbs Up" : "Thumbs Down", 56);
-    } else {
-      state.reaction = null;
-    }
-
-    gesturePill.textContent = stable.replace("_", " ");
-  } else {
-    state.trail = [];
-    state.raiseHand = false;
-    state.stableCount = 0;
-    state.raw = "NONE";
-    state.stable = "NONE";
-    state.pointHoldFrames = 0;
-    state.zoomBox = null;
-    gesturePill.textContent = "—";
-    if (state.currentPath) {
-      state.paths.push(state.currentPath);
-      state.currentPath = null;
-    }
   }
-
-  ctx.restore();
+  gestureCursor.style.setProperty('--progress', `${progress * 360}deg`);
+  if (hit === boardCanvas) {
+    if (!gestureBoardDrawing) { startBoardDraw({clientX:x, clientY:y}); gestureBoardDrawing = true; }
+    else moveBoardDraw({clientX:x, clientY:y});
+  } else if (gestureBoardDrawing) { endBoardDraw(); gestureBoardDrawing = false; }
+  const overUI = !!target || !!hit?.closest('.glass-panel, #draw-bar');
+  if (state.mode === 'draw' && !overUI && !manualDrawing) {
+    if (!state.currentPath) state.currentPath = newInkPath();
+    appendPoint(state.currentPath, {x,y});
+  } else if (state.currentPath && !manualDrawing) {
+    state.paths.push(state.currentPath); state.currentPath = null;
+  }
+  return {x,y};
 }
-
+function onResults(results) {
+  if (canvas.width !== innerWidth || canvas.height !== innerHeight) {
+    canvas.width = innerWidth; canvas.height = innerHeight;
+  }
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const lm = results.multiHandLandmarks?.[0];
+  let position = null;
+  if (lm && isPoint(lm)) {
+    // Match the mirrored, cover-fitted camera to viewport coordinates.
+    const scale = Math.max(innerWidth / video.videoWidth, innerHeight / video.videoHeight);
+    const tip = smoothTip({x: .5 + (.5-lm[8].x)*video.videoWidth*scale/innerWidth,
+      y: .5 + (lm[8].y-.5)*video.videoHeight*scale/innerHeight});
+    position = trackGesturePointer(tip);
+    gesturePill.textContent = 'Point · fold to lift';
+  } else { resetGesturePointer(); gesturePill.textContent = 'Point one finger'; }
+  drawPaths();
+  if (position && state.spotlight) drawSpotlight(position.x, position.y);
+  if (position && state.laser) drawLaser(position.x, position.y);
+}
 // ---------- UI events ----------
 document.getElementById("menu-btn").onclick = () => sideMenu.classList.toggle("hidden");
 
 document.querySelectorAll("[data-close]").forEach(btn => {
   btn.onclick = () => {
     document.getElementById(btn.dataset.close).classList.add("hidden");
-    if (["board-panel", "pdf-panel", "notes-panel", "timer-panel"].includes(btn.dataset.close)) {
-      setMode("idle");
-    }
+    if ((btn.dataset.close === 'board-panel' && state.mode === 'board') ||
+        (btn.dataset.close === 'pdf-panel' && state.mode === 'pdf') ||
+        (btn.dataset.close === 'notes-panel' && state.mode === 'notes')) setMode('idle');
+    document.getElementById('menu-btn').focus({preventScroll:true});
   };
 });
 
@@ -553,13 +368,13 @@ document.querySelectorAll(".menu-item").forEach(btn => {
     sideMenu.classList.add("hidden");
     if (a === "whiteboard") openBoard("white");
     else if (a === "blackboard") openBoard("black");
-    else if (a === "draw") { closeAllPanels(); state.highlighter = false; state.eraser = false; setMode("draw"); }
-    else if (a === "highlight") { closeAllPanels(); state.highlighter = true; state.eraser = false; setMode("draw"); }
+    else if (a === "draw") { state.highlighter = false; state.eraser = false; setMode("draw"); }
+    else if (a === "highlight") { state.highlighter = true; state.eraser = false; setMode("draw"); }
     else if (a === "laser") { state.laser = !state.laser; state.spotlight = false; setMode(state.laser ? "laser" : "idle"); }
-    else if (a === "pdf") { closeAllPanels(); pdfPanel.classList.remove("hidden"); setMode("pdf"); }
-    else if (a === "notes") { closeAllPanels(); notesPanel.classList.remove("hidden"); setMode("notes"); }
-    else if (a === "timer") { closeAllPanels(); timerPanel.classList.remove("hidden"); }
-    else if (a === "clear") { state.paths = []; state.currentPath = null; }
+    else if (a === "pdf") { pdfPanel.classList.remove("hidden"); setMode("pdf"); }
+    else if (a === "notes") { notesPanel.classList.remove("hidden"); setMode("notes"); }
+    else if (a === "timer") { timerPanel.classList.remove("hidden"); }
+    else if (a === "clear") { state.paths = []; state.currentPath = null; cachedPaths = -1; }
     else if (a === "settings") { state.spotlight = !state.spotlight; state.laser = false; setMode(state.spotlight ? "spotlight" : "idle"); }
   };
 });
@@ -592,7 +407,7 @@ document.querySelectorAll("[data-board-action]").forEach(btn => {
   btn.onclick = () => {
     if (btn.dataset.boardAction === "undo") state.boardPaths.pop();
     if (btn.dataset.boardAction === "clear") state.boardPaths = [];
-    redrawBoard();
+    boardDirty = true; redrawBoard();
   };
 });
 
@@ -604,61 +419,166 @@ function boardPos(e) {
   const clientY = e.touches ? e.touches[0].clientY : e.clientY;
   return { x: clientX - r.left, y: clientY - r.top };
 }
+function appendPoint(path, point) {
+  const last = path.points.at(-1);
+  if (!last || Math.hypot(point.x-last.x, point.y-last.y) >= .65) path.points.push(point);
+}
+function newInkPath() {
+  return {points:[], color:state.drawColor, width: state.brushSize * (state.eraser ? 6 : state.highlighter ? 4 : 1),
+    alpha:state.highlighter ? .28 : 1, eraser:state.eraser};
+}
 function startBoardDraw(e) {
   boardDrawing = true;
-  const p = boardPos(e);
-  const baseColor = state.boardMode === "black" ? "#ffffff" : "#111111";
-  state.boardCurrent = {
-    points: [p],
-    color: state.boardTool === "highlighter" ? "#ffd60a" : baseColor,
-    width: state.boardTool === "eraser" ? 22 : (state.boardTool === "highlighter" ? 16 : 3),
-    alpha: state.boardTool === "highlighter" ? 0.4 : 1
-  };
+  state.boardCurrent = {points:[boardPos(e)], color:state.boardTool === 'highlighter' ? '#e9b949' :
+    (state.boardMode === 'black' ? '#ffffff' : '#18252b'),
+    width:state.brushSize * (state.boardTool === 'eraser' ? 6 : state.boardTool === 'highlighter' ? 4 : 1),
+    alpha:state.boardTool === 'highlighter' ? .3 : 1, eraser:state.boardTool === 'eraser'};
+  queueBoardDraw();
 }
 function moveBoardDraw(e) {
   if (!boardDrawing || !state.boardCurrent) return;
-  const p = boardPos(e);
-  const last = state.boardCurrent.points[state.boardCurrent.points.length - 1];
-  if (Math.hypot(p.x - last.x, p.y - last.y) > 1.5) state.boardCurrent.points.push(p);
-  redrawBoard();
-  const path = state.boardCurrent;
-  boardCtx.beginPath();
-  boardCtx.moveTo(path.points[0].x, path.points[0].y);
-  for (let i = 1; i < path.points.length; i++) boardCtx.lineTo(path.points[i].x, path.points[i].y);
-  boardCtx.strokeStyle = path.color;
-  boardCtx.lineWidth = path.width;
-  boardCtx.lineCap = "round";
-  boardCtx.globalAlpha = path.alpha;
-  boardCtx.stroke();
-  boardCtx.globalAlpha = 1;
+  appendPoint(state.boardCurrent, boardPos(e)); queueBoardDraw();
 }
 function endBoardDraw() {
-  if (state.boardCurrent) {
-    state.boardPaths.push(state.boardCurrent);
-    state.boardCurrent = null;
-  }
-  boardDrawing = false;
-  redrawBoard();
+  if (state.boardCurrent) {state.boardPaths.push(state.boardCurrent); state.boardCurrent = null; boardDirty = true;}
+  boardDrawing = false; queueBoardDraw();
 }
-boardCanvas.addEventListener("mousedown", startBoardDraw);
-boardCanvas.addEventListener("mousemove", moveBoardDraw);
-boardCanvas.addEventListener("mouseup", endBoardDraw);
-boardCanvas.addEventListener("mouseleave", endBoardDraw);
-boardCanvas.addEventListener("touchstart", e => { e.preventDefault(); startBoardDraw(e); }, { passive: false });
-boardCanvas.addEventListener("touchmove", e => { e.preventDefault(); moveBoardDraw(e); }, { passive: false });
-boardCanvas.addEventListener("touchend", endBoardDraw);
+let boardPointer = null;
+boardCanvas.addEventListener('pointerdown', e => {
+  if (!e.isPrimary || e.button !== 0 || boardPointer !== null) return;
+  boardPointer = e.pointerId; boardCanvas.setPointerCapture(e.pointerId); startBoardDraw(e);
+});
+boardCanvas.addEventListener('pointermove', e => {
+  if (e.pointerId !== boardPointer) return;
+  for (const sample of e.getCoalescedEvents?.() || [e]) moveBoardDraw(sample);
+});
+function releaseBoardPointer(e) {
+  if (e.pointerId !== boardPointer) return;
+  boardPointer = null; endBoardDraw();
+}
+boardCanvas.addEventListener('pointerup', releaseBoardPointer);
+boardCanvas.addEventListener('pointercancel', releaseBoardPointer);
+boardCanvas.addEventListener('lostpointercapture', releaseBoardPointer);
 
-// PDF
+// PDF: lazy-render pages in our own scroll container; native iframe viewers
+// do not expose scrolling to hand gestures or custom controls.
 const pdfInput = document.getElementById("pdf-input");
-const pdfFrame = document.getElementById("pdf-frame");
 const pdfDrop = document.getElementById("pdf-drop");
-pdfInput.onchange = () => {
-  const file = pdfInput.files[0];
+const pdfReader = document.getElementById("pdf-reader");
+const pdfPages = document.getElementById("pdf-pages");
+const pdfScroll = document.getElementById("pdf-scroll");
+const pdfStatus = document.getElementById("pdf-status");
+let pdfDocument = null, pdfObserver = null, pdfGeneration = 0;
+let pdfLibrary = null;
+let currentPdfPage = 1;
+async function loadPdf(file) {
   if (!file) return;
-  pdfFrame.src = URL.createObjectURL(file);
-  pdfFrame.classList.remove("hidden");
-  pdfDrop.classList.add("hidden");
+  if (!file.name.toLowerCase().endsWith('.pdf') || file.size > 50 * 1024 * 1024) {
+    pdfStatus.textContent = "Choose a PDF smaller than 50 MB."; return;
+  }
+  const generation = ++pdfGeneration;
+  pdfObserver?.disconnect();
+  if (pdfDocument) { await pdfDocument.destroy(); pdfDocument = null; }
+  pdfPages.replaceChildren();
+  pdfReader.classList.add("hidden");
+  pdfDrop.classList.remove("hidden");
+  document.getElementById('pdf-prev').disabled = true;
+  document.getElementById('pdf-next').disabled = true;
+  pdfStatus.textContent = "Opening PDF…";
+  try {
+    pdfLibrary ||= await import('https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.min.mjs');
+    pdfLibrary.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.min.mjs';
+    const data = await file.arrayBuffer();
+    const doc = await pdfLibrary.getDocument({data, isEvalSupported: false}).promise;
+    if (generation !== pdfGeneration) { await doc.destroy(); return; }
+    pdfDocument = doc;
+    const first = await doc.getPage(1);
+    const viewport = first.getViewport({scale:1});
+    for (let n = 1; n <= doc.numPages; n++) {
+      const page = document.createElement('div');
+      page.className = 'pdf-page'; page.dataset.page = n;
+      page.style.aspectRatio = `${viewport.width} / ${viewport.height}`;
+      page.setAttribute('aria-label', `Page ${n}`);
+      pdfPages.append(page);
+    }
+    pdfDrop.classList.add("hidden"); pdfReader.classList.remove("hidden");
+    currentPdfPage = 1;
+    pdfPages.scrollTop = 0;
+    pdfObserver = new IntersectionObserver(entries => {
+      for (const entry of entries) {
+        entry.target.dataset.nearby = entry.isIntersecting ? "true" : "false";
+        if (entry.isIntersecting) renderPdfPage(entry.target, generation);
+        else if (entry.target.dataset.rendered) {
+          entry.target.replaceChildren(); delete entry.target.dataset.rendered;
+        }
+      }
+    }, { root: pdfPages, rootMargin: '300px' });
+    pdfPages.querySelectorAll('.pdf-page').forEach(page => pdfObserver.observe(page));
+    pdfStatus.textContent = `${file.name} · ${doc.numPages} pages · Drag the right rail to scroll`;
+    document.getElementById('pdf-prev').disabled = false;
+    document.getElementById('pdf-next').disabled = false;
+  } catch {
+    if (generation !== pdfGeneration) return;
+    pdfStatus.textContent = "Could not open this PDF. It may be password-protected, damaged, or the reader could not load. Choose another file or try again.";
+    pdfReader.classList.add('hidden'); pdfDrop.classList.remove('hidden');
+  }
+}
+async function renderPdfPage(container, generation) {
+  if (container.dataset.rendered || container.dataset.rendering) return;
+  container.dataset.rendering = 'true';
+  try {
+    const page = await pdfDocument.getPage(Number(container.dataset.page));
+    if (generation !== pdfGeneration || !container.isConnected) return;
+    const base = page.getViewport({scale:1});
+    const width = pdfPages.clientWidth;
+    const viewport = page.getViewport({scale: Math.min(1.5, devicePixelRatio || 1) * width / base.width});
+    const surface = document.createElement('canvas');
+    surface.width = Math.ceil(viewport.width); surface.height = Math.ceil(viewport.height);
+    container.style.aspectRatio = `${base.width} / ${base.height}`;
+    await page.render({canvasContext:surface.getContext('2d'), viewport}).promise;
+    if (generation !== pdfGeneration || !container.isConnected) return;
+    if (container.dataset.nearby !== "true") return;
+    container.replaceChildren(surface); container.dataset.rendered = 'true';
+  } catch { container.classList.add('failed'); }
+  finally { delete container.dataset.rendering; }
+}
+pdfInput.onchange = () => { loadPdf(pdfInput.files[0]); pdfInput.value = ''; };
+pdfDrop.addEventListener('dragover', e => {e.preventDefault();});
+pdfDrop.addEventListener('drop', e => {e.preventDefault(); loadPdf(e.dataTransfer.files[0]);});
+document.getElementById('pdf-change').onclick = () => pdfInput.click();
+document.getElementById('pdf-expand').onclick = e => {
+  const expanded = pdfPanel.classList.toggle('expanded');
+  e.currentTarget.textContent = expanded ? 'Restore' : 'Expand';
+  e.currentTarget.setAttribute('aria-pressed', expanded);
 };
+function scrollPdfAt(clientY) {
+  const rect = pdfScroll.getBoundingClientRect();
+  const ratio = Math.max(0, Math.min(1, (clientY - rect.top - 19) / Math.max(1, rect.height - 38)));
+  pdfPages.scrollTop = ratio * (pdfPages.scrollHeight - pdfPages.clientHeight);
+}
+let railDragging = false;
+pdfScroll.onpointerdown = e => { railDragging = true; pdfScroll.setPointerCapture(e.pointerId); scrollPdfAt(e.clientY); };
+pdfScroll.onpointermove = e => { if (railDragging) scrollPdfAt(e.clientY); };
+pdfScroll.onpointerup = pdfScroll.onpointercancel = () => { railDragging = false; };
+pdfScroll.onkeydown = e => {
+  const offsets = {ArrowDown:80, ArrowUp:-80, PageDown:pdfPages.clientHeight, PageUp:-pdfPages.clientHeight};
+  if (e.key in offsets) {e.preventDefault(); pdfPages.scrollTop += offsets[e.key];}
+  if (e.key === 'Home' || e.key === 'End') {e.preventDefault(); pdfPages.scrollTop = e.key === 'Home' ? 0 : pdfPages.scrollHeight;}
+};
+pdfPages.onscroll = () => {
+  const max = pdfPages.scrollHeight - pdfPages.clientHeight;
+  const ratio = max > 0 ? pdfPages.scrollTop / max : 0;
+  pdfScroll.firstElementChild.style.top = `${ratio * Math.max(0, pdfScroll.clientHeight - 38)}px`;
+  pdfScroll.setAttribute('aria-valuenow', Math.round(ratio * 100));
+  const pages = [...pdfPages.children];
+  currentPdfPage = Math.max(1, pages.findLastIndex(page => page.offsetTop <= pdfPages.offsetTop + pdfPages.scrollTop + 30) + 1);
+};
+function stepPdf(direction) {
+  const page = pdfPages.children[Math.max(0, Math.min(pdfPages.children.length - 1, currentPdfPage - 1 + direction))];
+  if (page) { pdfPages.scrollTop += page.getBoundingClientRect().top - pdfPages.getBoundingClientRect().top; }
+}
+document.getElementById('pdf-prev').onclick = () => stepPdf(-1);
+document.getElementById('pdf-next').onclick = () => stepPdf(1);
 
 // Timer
 document.querySelectorAll("[data-timer]").forEach(btn => {
@@ -678,53 +598,118 @@ document.querySelectorAll("[data-timer]").forEach(btn => {
 });
 
 // ---------- Init ----------
-async function init() {
-  hands = new Hands({
-    locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const script = document.createElement('script'); script.src = src;
+    script.onload = resolve; script.onerror = () => {script.remove(); reject(new Error('Could not load gesture engine'));};
+    document.head.append(script);
   });
-  hands.setOptions({
-    maxNumHands: 2,
-    modelComplexity: 1,
-    minDetectionConfidence: 0.72,
-    minTrackingConfidence: 0.65
-  });
-  hands.onResults(onResults);
-
-  const stream = await navigator.mediaDevices.getUserMedia({
-    video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
-    audio: false
-  });
-  video.srcObject = stream;
-  await video.play();
-
-  camera = new Camera(video, {
-    onFrame: async () => { if (hands) await hands.send({ image: video }); },
-    width: 1280,
-    height: 720
-  });
-  await camera.start();
-  setMode("idle");
-  updateTimerDisplay();
 }
-
+let stream = null, frameId = null, frameRunning = false;
+let lastFrameAt = 0;
+function renderManual() {
+  if (hands) return;
+  const width = innerWidth, height = innerHeight;
+  if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
+  ctx.clearRect(0, 0, width, height); drawPaths();
+  frameId = requestAnimationFrame(renderManual);
+}
+async function init() {
+  if (!window.Hands) await loadScript('https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js');
+  hands = new Hands({locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/${f}`});
+  hands.setOptions({maxNumHands:1, modelComplexity:0, minDetectionConfidence:0.6, minTrackingConfidence:0.6});
+  hands.onResults(onResults);
+  // Open the camera once; Camera utility previously opened a second stream.
+  stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:'user', width:{ideal:640}, height:{ideal:480}}, audio:false});
+  video.srcObject = stream; video.style.opacity = '1';
+  await video.play();
+  await hands.send({image:video});
+  frameRunning = true;
+  async function frame(t) {
+    if (!frameRunning) return;
+    if (!document.hidden && t - lastFrameAt > 32) {
+      lastFrameAt = t;
+      try { await hands.send({image:video}); }
+      catch { frameRunning = false; resetGesturePointer(); stream?.getTracks().forEach(track => track.stop()); const engine = hands; hands = null; engine.close().catch(() => {}); modePill.textContent = 'Tracking paused — use mouse or touch'; renderManual(); }
+    }
+    if (frameRunning) frameId = requestAnimationFrame(frame);
+  }
+  frameId = requestAnimationFrame(frame);
+  setMode('idle'); updateTimerDisplay();
+}
 startBtn.onclick = async () => {
   startBtn.disabled = true;
-  startBtn.textContent = "Loading...";
+  document.getElementById('manual-btn').disabled = true;
+  startBtn.textContent = 'Starting camera…';
   try {
-    await init();
-    startScreen.classList.add("hidden");
+    await init(); startScreen.classList.add('hidden');
   } catch (e) {
-    console.error(e);
-    alert("Camera permission is required.\nOn iPhone: Settings → Safari → Camera → Allow");
-    startBtn.disabled = false;
-    startBtn.textContent = "Start Session";
-  }
+    stream?.getTracks().forEach(track => track.stop());
+    if (hands) { try { await hands.close(); } catch {} hands = null; }
+    document.getElementById('start-status').textContent = e.name === 'NotAllowedError' ? 'Camera access was denied. Allow it in your browser settings, or open without camera.' : 'Camera or gesture tools could not start. Check your connection and camera, or open without camera.';
+    startBtn.disabled = false; startBtn.textContent = 'Try camera again';
+  } finally { document.getElementById('manual-btn').disabled = false; }
 };
+document.getElementById('manual-btn').onclick = () => {
+  startScreen.classList.add('hidden'); setMode('idle'); renderManual();
+};
+let manualDrawing = false, manualPointer = null;
+canvas.style.touchAction = 'none';
+document.getElementById('app').addEventListener('pointerdown', e => {
+  if (!e.isPrimary || e.button !== 0 || manualDrawing || state.mode !== 'draw' || e.target !== canvas) return;
+  manualDrawing = true; manualPointer = e.pointerId; canvas.setPointerCapture(e.pointerId);
+  state.currentPath = newInkPath();
+  addManualPoint(e);
+});
+function addManualPoint(e) {
+  if (e.pointerId === manualPointer && manualDrawing && state.currentPath) appendPoint(state.currentPath, {x:e.clientX, y:e.clientY});
+}
+canvas.addEventListener('pointermove', addManualPoint);
+function finishManualDraw(e) { if (e && e.pointerId !== manualPointer) return; if (manualDrawing && state.currentPath) {state.paths.push(state.currentPath); state.currentPath = null;} manualDrawing = false; manualPointer = null; }
+canvas.addEventListener('pointerup', finishManualDraw);
+canvas.addEventListener('pointercancel', finishManualDraw);
+canvas.addEventListener('lostpointercapture', finishManualDraw);
+new MutationObserver(() => {canvas.style.pointerEvents = state.mode === 'draw' ? 'auto' : 'none';}).observe(modePill, {childList:true});
+document.addEventListener('keydown', e => {if (e.key === 'Escape') closeMenuAndMore();});
+new MutationObserver(() => {document.getElementById('menu-btn').setAttribute('aria-expanded', !sideMenu.classList.contains('hidden'));}).observe(sideMenu, {attributes:true, attributeFilter:['class']});
+document.querySelectorAll('.close-btn').forEach(btn => btn.setAttribute('aria-label', `Close ${btn.dataset.close.replace('-panel','').replace('side-menu','tools')}`));
+window.addEventListener('pagehide', () => {frameRunning = false; clearInterval(state.timerInterval); cancelAnimationFrame(frameId); stream?.getTracks().forEach(track => track.stop());});
 
 window.addEventListener("resize", () => {
   if (!boardPanel.classList.contains("hidden")) resizeBoard();
 });
-document.addEventListener("gesturestart", e => e.preventDefault());
-document.addEventListener("touchmove", e => {
-  if (e.touches.length > 1) e.preventDefault();
-}, { passive: false });
+
+// CSS grid keeps every open tool in the layout; no manual dragging is needed.
+const workspace = document.getElementById('workspace');
+const toolPanels = [boardPanel, pdfPanel, notesPanel, timerPanel];
+function syncWorkspace() {
+  const count = toolPanels.filter(panel => !panel.classList.contains('hidden')).length;
+  workspace.dataset.count = count;
+  document.getElementById('workspace-hint').classList.toggle('hidden', count > 0);
+  document.querySelectorAll('.menu-item').forEach(button => {
+    const panel = {whiteboard:boardPanel, blackboard:boardPanel, pdf:pdfPanel, notes:notesPanel, timer:timerPanel}[button.dataset.action];
+    if (panel) button.setAttribute('aria-pressed', !panel.classList.contains('hidden') &&
+      (button.dataset.action !== 'whiteboard' || state.boardMode === 'white') &&
+      (button.dataset.action !== 'blackboard' || state.boardMode === 'black'));
+  });
+}
+const panelObserver = new MutationObserver(syncWorkspace);
+toolPanels.forEach(panel => panelObserver.observe(panel, {attributes:true, attributeFilter:['class']}));
+new ResizeObserver(() => {
+  if (!boardPanel.classList.contains('hidden')) resizeBoard();
+}).observe(boardWrap);
+syncWorkspace();
+
+// Brush size is shared between board and screen ink; step buttons support dwell.
+function updateBrush(delta) {
+  state.brushSize = Math.max(1, Math.min(12, state.brushSize + delta));
+  document.querySelectorAll('.brush-value').forEach(label => label.textContent = `${state.brushSize} px`);
+}
+document.querySelectorAll('[data-brush-step]').forEach(button => button.onclick = () => updateBrush(Number(button.dataset.brushStep)));
+function syncBrushUI() {
+  document.getElementById('btn-highlighter').setAttribute('aria-pressed', state.highlighter);
+  document.getElementById('btn-eraser').setAttribute('aria-pressed', state.eraser);
+  document.querySelectorAll('[data-board-tool]').forEach(button => button.setAttribute('aria-pressed', button.dataset.boardTool === state.boardTool));
+  document.querySelectorAll('.swatch').forEach(button => button.setAttribute('aria-pressed', button.dataset.color === state.drawColor));
+}
+document.addEventListener('click', syncBrushUI); syncBrushUI();

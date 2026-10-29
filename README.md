@@ -1,29 +1,29 @@
-# Gestura – Full Gesture Live Classroom
+# Gestura – One-Finger Whiteboard & PDF Presentation
 
-## Implemented gestures
+Advanced live classroom workspace with one-finger gesture control.
 
-| Gesture | Action |
-|--------|--------|
-| Slide hand down | Open side menu |
-| Slide hand up | Close menu / everything |
-| Pinch | Draw / select (touch-screen style) |
-| Swipe Right → Left | Open Whiteboard |
-| Index point + hold | Toggle Laser |
-| Victory (peace) | Highlighter mode |
-| Double pinch | Undo |
-| Fist hold | Cancel / close all |
-| Thumbs up | Reaction badge |
-| Thumbs down | Reaction badge |
-| High open palm | Raise-hand badge |
-| Two-hand frame | Zoom region frame |
+## Live demos
+- GitHub Pages: https://tahasalayma.github.io/Gestura/
+- Netlify (if public): https://gstra.netlify.app/
 
-## Other features
+## Features
+- One-finger point + hold to select tools
 - Whiteboard / Blackboard
-- Air draw + highlighter + eraser
-- Spotlight mode
-- PDF board
+- PDF presenter (pdf.js, page scroll rail)
+- Draw / Highlight / Eraser + brush size
+- Laser + Spotlight
 - Notes + Timer
-- iOS glossy UI
+- Mouse / touch fallback (Open without camera)
+- Auto-tiled workspace panels
+
+## Controls
+| Action | How |
+|--------|-----|
+| Select button | Point index finger and hold until ring fills |
+| Draw | Point on board/canvas; fold finger to lift |
+| Open tools | Tools button or point-hold |
+| Close panel | Point-hold the ✕ |
+| Scroll PDF | Point on the right rail |
 
 ## Deploy
-Drag `gestura` folder to https://app.netlify.com/drop
+Upload `index.html`, `style.css`, `app.js` to GitHub Pages or Netlify.
