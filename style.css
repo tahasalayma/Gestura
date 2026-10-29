@@ -395,25 +395,3 @@ html, body {
   .start-card h1 { font-size: 28px; }
   .board-panel, .pdf-panel { height: 80vh; }
 }
-
-
-/* Brush select + pin */
-.brush-select {
-  appearance: none;
-  -webkit-appearance: none;
-  background: rgba(255,255,255,0.08);
-  border: 1px solid var(--glass-border);
-  color: var(--text);
-  border-radius: 12px;
-  padding: 7px 10px;
-  font-size: 12px;
-  font-weight: 600;
-  max-width: 110px;
-}
-.brush-select option { color: #111; }
-
-#btn-pin.active, .board-toolbar button.active {
-  background: rgba(0,212,255,0.2);
-  border-color: var(--accent);
-  color: var(--accent);
-}
